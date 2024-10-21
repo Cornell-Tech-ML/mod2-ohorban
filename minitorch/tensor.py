@@ -10,6 +10,7 @@ import numpy as np
 from . import operators
 from .autodiff import Context, Variable, backpropagate
 from .tensor_data import TensorData
+from .operators import prod
 
 # Comment these out if not yet implemented
 from .tensor_functions import (
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class History:
-    """`History` stores the history of `Function` operations that was
+    """History stores the history of Function operations that was
     used to construct the current Variable.
     """
 
@@ -92,7 +93,11 @@ class Tensor:
         else:
             self.name = str(self.unique_id)
 
-        self.f = backend
+        # Ensure backend is initialized properly
+        assert backend is not None, "Tensor backend must be provided"
+        self.f = backend  # Backend to perform operations (e.g., SimpleBackend)
+
+
 
     def requires_grad_(self, x: bool) -> None:
         self.history = History()
@@ -158,8 +163,8 @@ class Tensor:
 
     def expand(self, other: Tensor) -> Tensor:
         """Method used to allow for backprop over broadcasting.
-        This method is called when the output of `backward`
-        is a different size than the input of `forward`.
+        This method is called when the output of backward
+        is a different size than the input of forward.
 
 
         Args:
@@ -168,7 +173,7 @@ class Tensor:
 
         Returns:
         -------
-            Expanded version of `other` with the right derivatives
+            Expanded version of other with the right derivatives
 
         """
         # Case 1: Both the same shape.
@@ -205,6 +210,7 @@ class Tensor:
             out = zero(shape)
         out._type_(self.backend)
         return out
+    
 
     def tuple(self) -> Tuple[Storage, Shape, Strides]:
         """Get the tensor data info as a tuple."""
@@ -217,7 +223,7 @@ class Tensor:
     # Variable elements for backprop
 
     def accumulate_derivative(self, x: Any) -> None:
-        """Add `val` to the the derivative accumulated on this variable.
+        """Add val to the the derivative accumulated on this variable.
         Should only be called during autodifferentiation on leaf variables.
 
         Args:
@@ -235,7 +241,7 @@ class Tensor:
         self.grad += x
 
     def is_leaf(self) -> bool:
-        """True if this variable created by the user (no `last_fn`)"""
+        """True if this variable created by the user (no last_fn)"""
         return self.history is not None and self.history.last_fn is None
 
     def is_constant(self) -> bool:
@@ -254,10 +260,12 @@ class Tensor:
 
         x = h.last_fn._backward(h.ctx, d_output)
         assert len(x) == len(h.inputs), f"Bug in function {h.last_fn}"
-        return [
-            (inp, inp.expand(self._ensure_tensor(d_in)))
-            for inp, d_in in zip(h.inputs, x)
-        ]
+        result = []
+        for inp, d_in in zip(h.inputs, x):
+            if d_in is not None:
+                result.append((inp, inp.expand(self._ensure_tensor(d_in))))
+        return result
+
 
     def backward(self, grad_output: Optional[Tensor] = None) -> None:
         if grad_output is None:
@@ -282,6 +290,127 @@ class Tensor:
 
         """
         return self._tensor.shape
+    
+    def view(self, *shape: int) -> Tensor:
+        """Reshapes the tensor using the View function."""
+        # Unpack the shape if it's a single tuple/list
+        if len(shape) == 1 and isinstance(shape[0], (list, tuple)):
+            shape = shape[0]
+        return View.apply(self, shape)
 
-    # Functions
-    # TODO: Implement for Task 2.3.
+
+    # Implement properties
+    @property
+    def size(self) -> int:
+        return self._tensor.size
+
+    @property
+    def dims(self) -> int:
+        return len(self.shape)
+    
+    def all(self) -> Tensor:
+        # Logical AND reduction over all elements.
+        return All.apply(self)
+
+    # Implement basic operations
+    def add(self, other: TensorLike) -> Tensor:
+        return Add.apply(self, self._ensure_tensor(other))
+
+    def sub(self, other: TensorLike) -> Tensor:
+        return self.add(self._ensure_tensor(other).neg())
+
+    def mul(self, other: TensorLike) -> Tensor:
+        return Mul.apply(self, self._ensure_tensor(other))
+
+    def neg(self) -> Tensor:
+        return Neg.apply(self)
+    
+    def __eq__(self, other: TensorLike) -> Tensor:
+        """Implements element-wise equality between two tensors."""
+        return EQ.apply(self, self._ensure_tensor(other))
+
+    def lt(self, other: TensorLike) -> Tensor:
+        return LT.apply(self, self._ensure_tensor(other))
+
+    def eq(self, other: TensorLike) -> Tensor:
+        return EQ.apply(self, self._ensure_tensor(other))
+
+    def sigmoid(self) -> Tensor:
+        return Sigmoid.apply(self)
+
+    def relu(self) -> Tensor:
+        assert self.f is not None, "Backend is not initialized!"
+        return ReLU.apply(self)
+
+    def log(self) -> Tensor:
+        return Log.apply(self)
+
+    def exp(self) -> Tensor:
+        return Exp.apply(self)
+
+    def sum(self, dim: Optional[int] = None) -> Tensor:
+        if dim is None:
+            return Sum.apply(self)  # No dimension provided, reduce all dims
+        else:
+            dim_tensor = Tensor.make([dim], (1,), backend=self.backend)  # Wrap dim in a Tensor
+            return Sum.apply(self, dim_tensor)  # Pass the dim as a Tensor
+
+
+    def mean(self, dim: Optional[int] = None) -> Tensor:
+        total = self.sum(dim)
+        if dim is None:
+            return total / self.size
+        else:
+            return total / Tensor.make([self.shape[dim]], (1,), backend=self.backend)
+
+    def permute(self, *order: int) -> Tensor:
+        order_tensor = Tensor.make(list(order), (len(order),), backend=self.backend)
+        return Permute.apply(self, order_tensor)
+
+    def is_close(self, other: TensorLike) -> Tensor:
+        return IsClose.apply(self, self._ensure_tensor(other))
+
+    # Add operator overloads for arithmetic
+    def __add__(self, other: TensorLike) -> Tensor:
+        return self.add(other)
+
+    def __radd__(self, other: TensorLike) -> Tensor:
+        return self.add(other)
+
+    def __sub__(self, other: TensorLike) -> Tensor:
+        return self.sub(other)
+
+    def __rsub__(self, other: TensorLike) -> Tensor:
+        return self._ensure_tensor(other).sub(self)
+
+    def __mul__(self, other: TensorLike) -> Tensor:
+        return self.mul(other)
+
+    def __rmul__(self, other: TensorLike) -> Tensor:
+        return self.mul(other)
+
+    def __neg__(self) -> Tensor:
+        return self.neg()
+    
+    # Add operator overloads for comparisons
+    def __lt__(self, other: TensorLike) -> Tensor:
+        """Implements the 'less than' operator."""
+        return LT.apply(self, self._ensure_tensor(other))
+
+    def __gt__(self, other: TensorLike) -> Tensor:
+        """Implements the 'greater than' operator by reversing operands."""
+        return LT.apply(self._ensure_tensor(other), self)
+
+    def __le__(self, other: TensorLike) -> Tensor:
+        """Implements the 'less than or equal to' operator."""
+        return self.lt(other) | self.eq(other)
+
+    def __ge__(self, other: TensorLike) -> Tensor:
+        """Implements the 'greater than or equal to' operator."""
+        return self.gt(other) | self.eq(other)
+
+    def zero_grad_(self) -> None:
+        self.grad = None
+
+    def __hash__(self):
+        return id(self)

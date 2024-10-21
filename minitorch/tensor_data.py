@@ -33,7 +33,7 @@ UserStrides: TypeAlias = Sequence[int]
 
 
 def index_to_position(index: Index, strides: Strides) -> int:
-    """Converts a multidimensional tensor `index` into a single-dimensional position in
+    """Converts a multidimensional tensor index into a single-dimensional position in
     storage based on strides.
 
     Args:
@@ -45,14 +45,17 @@ def index_to_position(index: Index, strides: Strides) -> int:
 
     """
     # TODO: Implement for Task 2.1.
-    raise NotImplementedError("Need to implement for Task 2.1")
+    pos = 0
+    for i in range(min(len(index), len(strides))):
+        pos += index[i] * strides[i]
+    return pos
 
 
 def to_index(ordinal: int, shape: Shape, out_index: OutIndex) -> None:
-    """Convert an `ordinal` to an index in the `shape`.
+    """Convert an ordinal to an index in the shape.
     Should ensure that enumerating position 0 ... size of a
     tensor produces every index exactly once. It
-    may not be the inverse of `index_to_position`.
+    may not be the inverse of index_to_position.
 
     Args:
         ordinal: ordinal position to convert.
@@ -61,15 +64,19 @@ def to_index(ordinal: int, shape: Shape, out_index: OutIndex) -> None:
 
     """
     # TODO: Implement for Task 2.1.
-    raise NotImplementedError("Need to implement for Task 2.1")
+    if len(shape) == 0:
+        return
+    for i in reversed(range(len(shape))):
+        out_index[i] = ordinal % shape[i]
+        ordinal //= shape[i]
 
 
 def broadcast_index(
     big_index: Index, big_shape: Shape, shape: Shape, out_index: OutIndex
 ) -> None:
-    """Convert a `big_index` into `big_shape` to a smaller `out_index`
-    into `shape` following broadcasting rules. In this case
-    it may be larger or with more dimensions than the `shape`
+    """Convert a big_index into big_shape to a smaller out_index
+    into shape following broadcasting rules. In this case
+    it may be larger or with more dimensions than the shape
     given. Additional dimensions may need to be mapped to 0 or
     removed.
 
@@ -84,7 +91,13 @@ def broadcast_index(
 
     """
     # TODO: Implement for Task 2.2.
-    raise NotImplementedError("Need to implement for Task 2.2")
+    offset = len(big_shape) - len(shape)
+
+    for i in range(len(shape)):
+        if shape[i] == 1:
+            out_index[i] = 0
+        else:
+            out_index[i] = big_index[i + offset]
 
 
 def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
@@ -102,7 +115,26 @@ def shape_broadcast(shape1: UserShape, shape2: UserShape) -> UserShape:
 
     """
     # TODO: Implement for Task 2.2.
-    raise NotImplementedError("Need to implement for Task 2.2")
+    # Align shapes by right-padding with ones
+    len1, len2 = len(shape1), len(shape2)
+    max_len = max(len1, len2)
+    padded_shape1 = (1,) * (max_len - len1) + tuple(shape1)
+    padded_shape2 = (1,) * (max_len - len2) + tuple(shape2)
+
+    
+    broadcasted_shape = []
+    
+    for dim1, dim2 in zip(padded_shape1, padded_shape2):
+        if dim1 == dim2:
+            broadcasted_shape.append(dim1)
+        elif dim1 == 1:
+            broadcasted_shape.append(dim2)
+        elif dim2 == 1:
+            broadcasted_shape.append(dim1)
+        else:
+            raise IndexingError(f"Cannot broadcast shapes {shape1} and {shape2}")
+    
+    return tuple(broadcasted_shape)
 
 
 def strides_from_shape(shape: UserShape) -> UserStrides:
@@ -184,16 +216,18 @@ class TensorData:
             shape = (1,)
 
         # Check for errors
-        if aindex.shape[0] != len(self.shape):
-            raise IndexingError(f"Index {aindex} must be size of {self.shape}.")
+        if aindex.shape[0] != len(shape):  # Correct shape reference here
+            raise IndexingError(f"Index {aindex} must be size of {shape}.")
         for i, ind in enumerate(aindex):
-            if ind >= self.shape[i]:
-                raise IndexingError(f"Index {aindex} out of range {self.shape}.")
+            if ind >= shape[i]:  # Correct shape reference here
+                raise IndexingError(f"Index {aindex} out of range {shape}.")
             if ind < 0:
                 raise IndexingError(f"Negative indexing for {aindex} not supported.")
 
         # Call fast indexing.
-        return index_to_position(array(index), self._strides)
+        return index_to_position(aindex, self._strides)  # Ensure aindex is used correctly
+
+
 
     def indices(self) -> Iterable[UserIndex]:
         lshape: Shape = array(self.shape)
@@ -224,15 +258,17 @@ class TensorData:
             *order: a permutation of the dimensions
 
         Returns:
-            New `TensorData` with the same storage and a new dimension order.
+            New TensorData with the same storage and a new dimension order.
 
         """
         assert list(sorted(order)) == list(
             range(len(self.shape))
         ), f"Must give a position to each dimension. Shape: {self.shape} Order: {order}"
 
-        # TODO: Implement for Task 2.1.
-        raise NotImplementedError("Need to implement for Task 2.1")
+        new_shape = tuple(self.shape[o] for o in order)
+        new_strides = tuple(self.strides[o] for o in order)
+    
+        return TensorData(self._storage, new_shape, new_strides)
 
     def to_string(self) -> str:
         """Convert to string"""
