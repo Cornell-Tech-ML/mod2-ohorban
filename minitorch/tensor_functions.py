@@ -170,13 +170,17 @@ class Log(Function):
     def forward(ctx: Context, a: Tensor) -> Tensor:
         """Computes forward pass for natural logarithm."""
         ctx.save_for_backward(a)
-        return a.f.log_map(a, zeros(a.shape, backend=a.backend))
+        result = a.f.log_map(a, zeros(a.shape, backend=a.backend))
+        # print(f"Forward pass: input {a}, output {result}")
+        return result
 
     @staticmethod
     def backward(ctx: Context, grad_output: Tensor) -> Tensor:
         """Computes backward pass for natural logarithm."""
         a = ctx.saved_values[0]
-        return grad_output.f.mul_zip(grad_output, a.f.inv_map(a))
+        result = grad_output.f.mul_zip(grad_output, a.f.inv_map(a))
+        # print(f"Backward pass: input {a}, output {result}")
+        return result
 
 
 class Exp(Function):
