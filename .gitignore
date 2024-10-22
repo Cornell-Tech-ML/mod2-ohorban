@@ -130,3 +130,7 @@ dmypy.json
 *.\#*
 data/
 pyodide
+
+# workspace files
+.DS_Store
+minitorch/.DS_Store
